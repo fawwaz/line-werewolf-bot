@@ -1,0 +1,32 @@
+start
+ = c:perintah p:params?
+ {
+     if (p!=null){ return {type: c, payload: p};}
+     else { return {type: c}; }
+ }
+ 
+params 
+ = ws+ p:(four_numbers / Number)
+ { return p;}
+
+four_numbers "FourNumbers"
+ = first:[0-9] second:[0-9] third:[0-9] fourth:[0-9] { return parseInt(first + second + third + fourth); }
+
+Number "number"
+  = [0-9]+ { return parseInt(text(), 10); }
+
+command "command" 
+ = first:[a-zA-Z]i rest:[a-zA-Z]i* { return first + rest.join("")}
+ 
+perintah "perintah"
+ = kill / heal / leech / join_game / start_game
+
+// Reserved Words 
+kill = "kill"i { return text().toLowerCase(); } 
+heal = "heal"i { return text().toLowerCase(); } 
+leech = "leech"i { return text().toLowerCase(); } 
+join_game = "join_game"i { return text().toLowerCase(); } 
+start_game = "start_game"i { return text().toLowerCase(); } 
+
+ws "whitespace"
+ = [ \t\r\n]
