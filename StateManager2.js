@@ -46,6 +46,45 @@ function killPlayer(playerId) {
     });
 }
 
+function setPlayerLiveStatusByOrder(sessionId, order, status) {
+    return new Promise(function(resolve, reject) {
+        if(!sessionId || !order ) {
+            reject('No sessionId, order or status supplied ');
+        }
+
+        request.put(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '$and': [
+                {'session_id': sessionId},
+                {'order': order}
+            ]
+        })})
+        .query({
+            'm': false
+        })
+        .send({
+            '$set': {
+                'is_alive': status
+            }
+        }).then(function(succ){
+            resolve(succ.text);
+            var result = JSON.parse(succ.text);
+
+            if(result.n == 0){
+                reject('Player with session_id = ' + sessionId + ' and Order = '+ order +' not found');
+            }else if(result.n > 1){
+                reject('Illegal state, found multiple player with session_id = ' + sessionId + ' and Order = '+ order);
+            }else{
+                resolve(result);
+            }
+        }, function(err){
+            reject(err);
+        });
+    });
+}
+
 
 function createSession(group_room_id, activation_code) {
     // best thing if you can prevent duplicate from creating process
@@ -384,6 +423,33 @@ function getPlayer(playerId) {
                 reject('Illegal state, multiple playerId found with id = ' + playerId);
             }else if(result.length == 0) {
                 reject('Player with id = ' + playerId + ' not found ');
+            }else {
+                resolve(result[0]);
+            }
+        }, function(err){
+            reject(err);
+        })
+    });
+}
+
+function findPlayerByOrder(sessionId, order) {
+    return new Promise(function(resolve, reject) {
+        request.get(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '$and' : [
+                {'order': order},
+                {'session_id': sessionId}
+            ]
+        })})
+        .then(function(succ){
+            var result = JSON.parse(succ.text);
+
+            if(result.length > 1){
+                reject('Illegal state, multiple playerId found with sessionId = ' + sessionId + ' and order = '+order);
+            }else if(result.length == 0) {
+                reject('Player with sessionId = ' + sessionId + ' and order = ' + order + ' not found ');
             }else {
                 resolve(result[0]);
             }
@@ -790,6 +856,31 @@ function getOrderVoted(sessionId, action) {
     });
 }
 
+function countVote(sessionId, action) {
+    return new Promise(function(resolve, reject){
+        request.get(COLLECTION_VOTE)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '$and':[
+                    {'session_id':sessionId},
+                    {'action':action}
+                ]
+        })})
+        .then(function(succ){
+            var result = JSON.parse(succ.text);
+            var total_vote = 0;
+            for (var i = 0; i < result.length; i++) {
+                var vote = result[i];
+                total_vote = total_vote + vote.count;
+            }
+            resolve(total_vote);
+        },function(err){
+            reject(err);
+        }); 
+    });
+}
+
 function clearVote(sessionId, action) {
     return new Promise(function(resolve, reject){
         request.put(COLLECTION_VOTE)
@@ -899,7 +990,7 @@ function errCallback(err){
 // findPlayerByRoomId('room_321').then(succCallback).catch(errCallback);
 
 // should group by role
-// countRolesAlive('room_321').then(succCallback).catch(errCallback);
+// countRolesAlive('room_1').then(succCallback).catch(errCallback);
 
 // writeLog('test aja').then(succCallback).catch(errCallback);
 
@@ -909,17 +1000,22 @@ function errCallback(err){
 
 
 // Vote related
-// voteUp('defgj','kill',12).then(succCallback).catch(errCallback);
+// voteUp('5953d2e6c2ef164ab2db74f4','kill',2).then(succCallback).catch(errCallback);
 // voteUp('session_1','kill',1).then(succCallback).catch(errCallback);
 // findMaxVoteCount('session_1','kill').then(succCallback).catch(errCallback);
 // getOrderVoted('session_1','kill').then(succCallback).catch(errCallback);
 // clearVote('session_1','kill').then(succCallback).catch(errCallback);
+// countVote('5953d2e6c2ef164ab2db74f4','kill').then(succCallback).catch(errCallback);
+
 // setDefaultRoleByActvCode('4055').then(succCallback);
 
 // findPlayerWithRoleByRoomId('room_1','werewolf').then(succCallback).catch(errCallback);
 // findPlayerBySessionId('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
 // getSession('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
 // setSessionState('5953d2e6c2ef164ab2db74f4', 'kill').then(succCallback)catch(errCallback);
+// findPlayerByOrder('5953d2e6c2ef164ab2db74f4',1).then(succCallback).catch(errCallback);
+
+setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',1, false).then(succCallback).catch(errCallback);
 
 module.exports = {
     'killPlayer': killPlayer,
@@ -927,11 +1023,13 @@ module.exports = {
     'findSessionByActvCode': findSessionByActvCode,
     'findSessionByRoomId': findSessionByRoomId,
     'getSession': getSession,
+    'setSessionState': setSessionState,
     'joinSession': joinSession,
     'deleteSession': deleteSession,
     'deleteMember': deleteMember,
     'deleteSessionAndMember': deleteSessionAndMember,
     'setRole': setRole,
+    'setPlayerLiveStatusByOrder': setPlayerLiveStatusByOrder,
     'getPlayer': getPlayer,
     'getRole': getRole,
     'healPlayer': healPlayer,
@@ -946,5 +1044,10 @@ module.exports = {
     'findPlayerBySessionId': findPlayerBySessionId,
     'findPlayerWithRoleByRoomId': findPlayerWithRoleByRoomId,
     'findPlayerWithRoleBySessionId': findPlayerWithRoleBySessionId,
-    'setDefaultRoleByActvCode': setDefaultRoleByActvCode
+    'setDefaultRoleByActvCode': setDefaultRoleByActvCode,
+    'findPlayerByOrder' : findPlayerByOrder,
+    'voteUp': voteUp,
+    'countVote': countVote,
+    'getOrderVoted': getOrderVoted,
+    'clearVote':clearVote
 }
