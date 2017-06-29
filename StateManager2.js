@@ -72,6 +72,68 @@ function createSession(group_room_id, activation_code) {
     })
 }
 
+function getSession(sessionId) {
+    return new Promise(function(resolve, reject){
+        console.log("session id yang mau diget dalam getSession function adalah :" + sessionId);
+        request.get(COLLECTION_SESSION)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '_id': {
+                '$oid': sessionId.toString()
+            }
+        })})
+        .then(function(succ){
+            var result = JSON.parse(succ.text);
+            if(result.length == 1) {
+                resolve(result[0]);
+            }else{
+                reject('Ilegal state, multiple session Id found with session Id = ' + sessionId);
+            }
+        },function(err){
+            reject(err);
+        });
+    });
+}
+
+function setSessionState(sessionId, state) {
+    return new Promise(function(resolve, reject) {
+        if(!sessionId || !state ) {
+            reject('No sessionId or State supplied ');
+        }
+
+        request.put(COLLECTION_SESSION)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '_id': {
+                '$oid': sessionId
+            }
+        })})
+        .query({
+            'm': false
+        })
+        .send({
+            '$set': {
+                'state': state
+            }
+        }).then(function(succ){
+            resolve(succ.text);
+            var result = JSON.parse(succ.text);
+
+            if(result.n == 0){
+                reject('Player with id = ' + playerId + ' not found');
+            }else if(result.n > 1){
+                reject('Illegal state, found multiple player with id = ' + playerId);
+            }else{
+                resolve(result);
+            }
+        }, function(err){
+            reject(err);
+        });
+    });
+}
+
 function findSessionByActvCode(activation_code) {
     return new Promise(function(resolve, reject){
         if(!activation_code){
@@ -261,6 +323,52 @@ function setRole(playerId, playerRole){
     });
 }
 
+function setDefaultRoleBySessionId(sessionId){
+    return new Promise(function(resolve, reject) {
+        if(!sessionId) {
+            reject('No sessionId provided ');
+        }
+
+        request.put(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            'session_id': sessionId
+        })})
+        .query({
+            'm': true
+        })
+        .send({
+            '$set': {
+                'role': constant.ROLE_VILLAGER
+            }
+        }).then(function(succ){
+            var result = JSON.parse(succ.text);
+            resolve(succ.text);
+        }, function(err){
+            reject(err);
+        });
+    });
+}
+
+function setDefaultRoleByActvCode(activation_code) {
+    return new Promise(function(resolve, reject){
+        findSessionByActvCode(activation_code)
+        .then(function(session){
+            var session_id = session._id.$oid;
+            setDefaultRoleBySessionId(session_id)
+            .then(function(succ){
+                resolve(succ);
+            })
+            .catch(function(err){
+                reject(err);
+            })
+        }).catch(function(err){
+            reject(err);
+        })
+    });
+}
+
 function getPlayer(playerId) {
     return new Promise(function(resolve, reject) {
         request.get(COLLECTION_MEMBER)
@@ -441,25 +549,83 @@ function findPlayerByActvCode(activation_code){
         .then(function(session){
             var session_id = session._id.$oid;
 
-            request.get(COLLECTION_MEMBER)
-            .set('Content-Type', 'application/json')
-            .query({'apiKey':API_KEY})
-            .query({'q':JSON.stringify({
-                'session_id':session_id
-            })})
-            .query({'f':JSON.stringify({
-                'display_name':1, // should be display_name
-                'is_alive':1,
-                'role':1
-            })})
+            findPlayerBySessionId(session_id)
             .then(function(succ){
-                var result = JSON.parse(succ.text);
-                resolve(result);
-            },function(err){
+                resolve(succ);
+            })
+            .catch(function(err){
                 reject(err);
             })
         })
         .catch(function(err){
+            reject(err);
+        });
+    });
+}
+
+function findPlayerBySessionId(sessionId){
+    return new Promise(function(resolve, reject){
+        request.get(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            'session_id':sessionId
+        })})
+        .query({'f':JSON.stringify({
+            'display_name':1, // should be display_name
+            'is_alive':1,
+            'role':1,
+            'member_id': 1,
+            'order': 1
+        })})
+        .then(function(succ){
+            var result = JSON.parse(succ.text);
+            resolve(result);
+        },function(err){
+            reject(err);
+        });
+    });
+}
+
+function findPlayerWithRoleByRoomId(roomId, role){
+    return new Promise(function(resolve, reject){
+        findSessionByRoomId(roomId)
+        .then(function(session){
+            var session_id = session._id.$oid;
+            
+            findPlayerWithRoleBySessionId(session_id, role)
+            .then(function(succ){
+                resolve(succ);
+            }).catch(function(err){
+                reject(err);
+            })
+        })
+        .catch(function(err){
+            reject(err);
+        });
+    });
+}
+
+function findPlayerWithRoleBySessionId(sessionId, role) {
+    return new Promise(function(resolve, reject) {
+        request.get(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            '$and':[
+                {'session_id': sessionId},
+                {'role': role},
+                {'is_alive': true}
+            ]
+        })})
+        .query({'f':JSON.stringify({
+            'member_id':1, // should be display_name
+            'display_name':1,
+        })})
+        .then(function(succ){
+            var result = JSON.parse(succ.text);
+            resolve(result);
+        },function(err){
             reject(err);
         });
     });
@@ -737,7 +903,7 @@ function errCallback(err){
 
 // writeLog('test aja').then(succCallback).catch(errCallback);
 
-// findPlayerByActvCode('9998').then(succCallback).catch(errCallback);
+// findPlayerByActvCode('4055').then(succCallback).catch(errCallback);
 
 // getPlayer('member_4447').then(succCallback).catch(errCallback);
 
@@ -748,13 +914,19 @@ function errCallback(err){
 // findMaxVoteCount('session_1','kill').then(succCallback).catch(errCallback);
 // getOrderVoted('session_1','kill').then(succCallback).catch(errCallback);
 // clearVote('session_1','kill').then(succCallback).catch(errCallback);
+// setDefaultRoleByActvCode('4055').then(succCallback);
 
+// findPlayerWithRoleByRoomId('room_1','werewolf').then(succCallback).catch(errCallback);
+// findPlayerBySessionId('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
+// getSession('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
+// setSessionState('5953d2e6c2ef164ab2db74f4', 'kill').then(succCallback)catch(errCallback);
 
 module.exports = {
     'killPlayer': killPlayer,
     'createSession': createSession,
     'findSessionByActvCode': findSessionByActvCode,
     'findSessionByRoomId': findSessionByRoomId,
+    'getSession': getSession,
     'joinSession': joinSession,
     'deleteSession': deleteSession,
     'deleteMember': deleteMember,
@@ -770,5 +942,9 @@ module.exports = {
     'writeLog': writeLog,
     'succCallback': succCallback,
     'errCallback': errCallback,
-    'findPlayerByActvCode': findPlayerByActvCode
+    'findPlayerByActvCode': findPlayerByActvCode,
+    'findPlayerBySessionId': findPlayerBySessionId,
+    'findPlayerWithRoleByRoomId': findPlayerWithRoleByRoomId,
+    'findPlayerWithRoleBySessionId': findPlayerWithRoleBySessionId,
+    'setDefaultRoleByActvCode': setDefaultRoleByActvCode
 }
