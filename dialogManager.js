@@ -54,7 +54,7 @@ function decideAction(event) {
       if (action_type == "heal") {
         return handleHeal(action_src_id, action_obj, event);
       }else if (action_type == "leech") {
-        return replyMessage(event.replyToken, JSON.stringify(action_obj)); 
+        return handleLeech(action_src_id, action_obj, event); 
       }else if (action_type == "kill") {
         console.log(action_obj);
         return handleKill(action_src_id, action_obj, event);
@@ -216,12 +216,16 @@ function handleHeal(userId, action_obj, event){
           var playerOrder = action_obj.payload;
           StateManager.findPlayerByOrder(session_id, playerOrder).then(function(patient){
             if(patient.is_alive) {
-              StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
-                StateManager.markPlayerAlreadyVoted(userId).then(function(){
-                  broadcastVoteHealMessage(session_id, userId, action_obj, event);
-                  checkWaitOrAutoHeal(session);
+              if(!player.voted){
+                StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
+                  StateManager.markPlayerAlreadyVoted(userId).then(function(){
+                    broadcastVoteHealMessage(session_id, userId, action_obj, event);
+                    checkWaitOrAutoHeal(session);
+                  });
                 });
-              });
+              }else{
+                replyMessage(event.replyToken, 'Maaf kamu sudah pernah voting sebelumnya');  
+              }
             } else {
               replyMessage(event.replyToken, 'Kamu hanya bisa menyembuhkan orang yang masih hidup');
             }
@@ -242,9 +246,42 @@ function handleSeer(action_obj){
   // not yet implemented
 }
 
-function handleLeech(action_obj) {
-  // 0. anounce the incident (whether someone get killed or doctor successful to heal someone)
+function handleLeech(action_src_id, action_obj, event) {
+  // 0. anounce every choices that user made to public group
+  StateManager.getPlayer(action_src_id).then(function(player){
+    var playerId = player._id.$oid;
+    var session_id = player.session_id;
+    if(player.is_alive) {
+      StateManager.getSession(session_id).then(function(session){
+        if(session.state != 'leech') {
+          replyMessage(event.replyToken, "Maaf kamu hanya bisa menggantung saat sesi menggantung !");
+        }else{
+          if(!player.voted){
+            var victimOrder = action_obj.payload;
+            StateManager.findPlayerByOrder(session_id, victimOrder).then(function(victim){
+              if(victim.is_alive) {
+                StateManager.voteUp(session_id, 'leech', victimOrder).then(function() {
+                  StateManager.markPlayerAlreadyVoted(playerId);
+                  broadcastVoteLeechMessage(session_id, action_src_id, action_obj, event);
+                  // Pindah ke turn werewolf lagi..
+                });    
+              }else{
+                replyMessage(event.replyToken, "Maaf kamu hanya tidak boleh menggantung orang yang sudah mati");
+              }
+            });
+          }else{
+            replyMessage(event.replyToken, "Maaf kamu sudah pernah melakukan voting pada periode ini");
+          }  
+        }
+      });
+    }else{
+      replyMessage(event.replyToken, "Maaf kamu sudah mati.");
+    }
+  });
+
   // 1. conver action_obj payload from "order" to lineUserId
+  // 2. validate that the command is executed by alive persom
+  //  dan yang di gantung adalah orang yang masih hidup.
   // 2. validate that the command is executed while in his turn (must be in the day and within leech session)
   // 3. Majority vote win whom to leech
   // 4. By the end of successfull kill selection, set the game state turn to werewolf session
@@ -274,11 +311,13 @@ function checkWaitOrAutoKill(session){
       var remainingWerewolf = roles.werewolf;
       var votedWolves = count;
       if(count == remainingWerewolf) {
+
         StateManager.getOrderVoted(session_id, 'kill').then(function(victimOrder){
           broadcastAfterKillMessage(session_id, victimOrder);
         }).catch(function(err){
-          StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
+          StateManager.writeLog('Failed on checkWaitOrAutoKill reason : ' + err.toString());
         });
+        
         console.log('this line is triggered when everyone already voted to kill');
         Timeout.clear('timeout_kill_'+session_id);
         StateManager.setSessionState(session_id, 'heal').then(function(){
@@ -298,6 +337,13 @@ function checkWaitOrAutoHeal(session) {
       var remainingDoctor = roles.doctor;
       var votedDoctor = count;
       if(count == remainingDoctor) {
+        
+        StateManager.getOrderVoted(session_id, 'heal').then(function(healedOrder){
+          broadcastAfterHealMessage(session_id, healedOrder);
+        }).catch(function(err){
+          StateManager.writeLog('Failed on cheekwaitorautoheal reason : ' + err.toString);
+        });
+
         console.log("this line is triggered when everyone already voted to heal");
         Timeout.clear('timeout_heal_'+session_id);
         // real perform kill should be put in here.
@@ -310,6 +356,30 @@ function checkWaitOrAutoHeal(session) {
         });
       }
     })
+  });
+}
+
+function checkWaitOrAutoLeech(session) {
+  var session_id = session.id.$oid;
+  StateManager.countVote(session_id, 'leech').then(function(count){
+    StateManager.findAlive(session.group_room_id).then(function(players){
+      var remaining_players = players.length;
+      var voted_players = count;
+      if(remaining_players == voted_players) {
+        StateManager.getOrderVoted(session_id, 'leech').then(function(leechedOrder){
+          broadcastAfterLeechMessage(session_id, leechedOrder);
+        }).catch(function(err){
+          StateManager.writeLog("Failedon checkWaitorAutoLeech function, reason : "+err);
+        });
+        console.log('this line is triggered when everywone already voted');
+        Timeout.clear('timeout_leech_'+session_id);
+        StateManager.setSessionState(session_id, 'kill').then(function(){
+          StateManager.resetVoteMark(session_id).then(function(){
+            werewolfTurn(session_id);
+          });
+        });
+      }
+    });
   });
 }
 
@@ -364,7 +434,7 @@ function initializeGame(actv_code, sessionId) {
   .then(function(players){
     var memberSize = players.length;
     var playerComposition = getPlayerComposition(memberSize);
-    var numOfSpecialCharacters = getTotalSpecialCharacter(playerComposition);
+    var numOfSpecialCharacters = getTotalRoleCount(playerComposition);
 
     StateManager.setDefaultRoleByActvCode(actv_code)
     .then(function(){  
@@ -433,7 +503,7 @@ function getPlayerComposition(memberSize) {
   return defaultComposition;
 }
 
-function getTotalSpecialCharacter(playerComposition) {
+function getTotalRoleCount(playerComposition) {
   var numOfSpecialCharacters = 0;
   for (var key in playerComposition) {
     if(playerComposition.hasOwnProperty(key)) {
@@ -533,12 +603,18 @@ function doctorTurn(sessionId) {
 function leechTurn(session_id) {
   StateManager.getSession(session_id).then(function(session){
     console.log("harusnya cek apakah werewolf menang dengan membunuh warga desa ini.. (jumlah remaining werewolf == jumlah warga desa)");
+
     var roomId = session.group_room_id;
-    pushMessage(roomId, 'Ayamg berkokok, pagi ini warga desa memutuskan untuk menggantung satu orang yang dicurigai sebagai siluman serigala -  GGS (ganteng-ganteng serigala). \n ');
+    pushMessage(roomId, 'Ayam berkokok, pagi ini warga desa memutuskan untuk menggantung satu orang yang dicurigai sebagai siluman serigala -  GGS (ganteng-ganteng serigala). \n Bagi yang masih hihdup Silahkan cek chat pribadi dengan bot ini untuk melakukan voting siapa yang ingin digantung. Kamu punya waktu 2 menit untuk berdiskusi');
     generatePlayerChoices(session_id, true).then(function(optionsMessage){
-        pushMessage(roomId, optionsMessage);
+      StateManager.findalive(roomId).then(function(players){
+        for (var i = 0; i < players.length; i++) {
+          var playerId = players[i].member_id;
+          optionsMessage = optionsMessage + '\n\n Silahkan vote siapa yang ingin digantung dengan perintah leech <spasi> nomor urut, kamu hanya bisa melakukan voting 1 kali';
+          pushMessage(playerId, optionsMessage);
+        }
+      });
     });
-    pushMessage(roomId, 'Silahkan vote siapa yang ingin digantung dengan perintah leech <spasi> nomor urut, kamu hanya bisa melakukan voting 1 kali');
 
     var durasi_vote_leech = 1000 * 60 * 2;
     Timeout.set('timeout_leech_'+session_id, function() {
@@ -636,6 +712,18 @@ function broadcastVoteHealMessage(session_id, action_src_id, action_obj, event){
   });
 }
 
+broadcastAfterHealMessage(session_id, order) {
+  StateManager.findPlayerWithRoleBySessionId(session_id, 'doctor').then(function(players){
+    StateManager.findPlayerByOrder(session_id, order).then(function(healed){
+      for (var i = 0; i < players.length; i++) {
+        var playerId = players[i].member_id;
+        var healedName = healed.display_name;
+        pushMessage(playerId, healedName + ' telah disembuhkan');
+      }
+    });
+  });
+}
+
 function generateVoteHealMessage(userId, sessionId, order){
   return new Promise(function(resolve, reject){
     getProfile(userId).then(function(healer){
@@ -645,6 +733,37 @@ function generateVoteHealMessage(userId, sessionId, order){
         resolve(healerDisplayname + ' telah me-vote untuk meng-heal ' + healedDisplayName);
       });
     })
+  });
+}
+
+// --- leech related ---
+function broadcastVoteLeechMessage(session_id, action_src_id, action_obj, event) {
+  StateManager.getSession(session_id).then(function(session){
+    var roomId = session.group_room_id;
+    var playerOrder = action_obj.payload;
+    StateManager.findPlayerByOrder(session_id, playerOrder).then(function(voted){
+      var votedId = voted.member_id;
+      var voterId = action_src_id;
+      getProfile(voterId).then(function(thevoter){
+        getProfile(votedId).then(function(thevoted){
+          var thevotername = thevoter.displayName;
+          var thevotedname = thevoted.displayName;
+
+          pushMessage(roomId, thevotername + 'telah memilih untuk menggantung ' + thevotedname);
+        });
+      });
+    });
+  });
+}
+
+function broadcastAfterLeechMessage(session_id, order){
+  StateManager.getSession(session_id).then(function(session){
+    var roomId = session.group_room_id;
+    StateManager.findPlayerByOrder(session_id, order).then(function(leeched){
+      var leeched_display_name = leeched.display_name;
+      var leeched_role = leeched.role;
+      pushMessage(roomId, 'Setelah melalui musyawarah, warga desa memilih untuk menggantung ' + leeched_display_name + ' di alun-alun desa. Ternyata dia adalah : ' + leeched_role);
+    });
   });
 }
 /**
