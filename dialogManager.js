@@ -106,6 +106,8 @@ function handleStartGame(roomId) {
 
     StateManager.createSession(roomId, activation_code).then(function(session){
       // Nyoba timeout
+      console.log("setting up a timeout to automatically move to (supposed to cancel the game) on ");
+      showTime();
       var sessionId = session._id.$oid;
       var durasi = 1000 * 60 * 1;
       Timeout.set('timeout_'+sessionId, function(){ //harusnya bukan roomId, tapi sessionId
@@ -164,18 +166,24 @@ function handleKill(action_src_id, action_obj, event){
           if(session.state != 'kill'){
             replyMessage(event.replyToken, 'Kamu hanya bisa membunuh saat giliran kamu (malam hari)');
           }else{
-            // vote up dan broadcast message, jangan lupa untuk clear kalau turnnya udah selesai kasih timeout
-            var playerOrder = action_obj.payload;
-            StateManager.findPlayerByOrder(session_id, playerOrder).then(function(victim){
-              if(victim.is_alive){
-                StateManager.voteUp(session_id, 'kill', playerOrder).then(function(){
-                  broadcastVoteKillMessage(session_id, action_src_id, action_obj, event);
-                  checkWaitOrAutoKill(session);
-                });
-              }else{
-                replyMessage(event.replyToken, 'Kamu hanya bisa membunuh orang yang masih hidup');
-              }
-            });
+            // vote up dan broadcast message, jangan lupa untuk clear kalau turnnya udah selesai kasih timeout 
+            // validasi terakhir:  HARUSNYA GAK BOLEH VOTE dua kali
+            if(!player.voted) {
+              var playerOrder = action_obj.payload;
+              StateManager.findPlayerByOrder(session_id, playerOrder).then(function(victim){
+                if(victim.is_alive){
+                  StateManager.voteUp(session_id, 'kill', playerOrder).then(function(){
+                    StateManager.markPlayerAlreadyVoted(action_src_id);
+                    broadcastVoteKillMessage(session_id, action_src_id, action_obj, event);
+                    checkWaitOrAutoKill(session);
+                  });
+                }else{
+                  replyMessage(event.replyToken, 'Kamu hanya bisa membunuh orang yang masih hidup');
+                }
+              });
+            }else{
+              replyMessage(event.replyToken, 'Maaf kamu sudah melakukan voting.');
+            }
           }
         });
       }else{
@@ -209,8 +217,10 @@ function handleHeal(userId, action_obj, event){
           StateManager.findPlayerByOrder(session_id, playerOrder).then(function(patient){
             if(patient.is_alive) {
               StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
-                broadcastVoteHealMessage(session_id, userId, action_obj, event);
-                checkWaitOrAutoHeal(session);
+                StateManager.markPlayerAlreadyVoted(userId).then(function(){
+                  broadcastVoteHealMessage(session_id, userId, action_obj, event);
+                  checkWaitOrAutoHeal(session);
+                });
               });
             } else {
               replyMessage(event.replyToken, 'Kamu hanya bisa menyembuhkan orang yang masih hidup');
@@ -250,6 +260,7 @@ function checkCancelGameOrInitGame(actv_code, sessionId) {
     // sementara ini sistemnya kaya gitu dulu, dan sementara ini dihardcode dulu, harusnya ada di config.js / constants.js
     // oiya constant.js harusnya make internationalization. (i18n.js)
     if(memberSize >= 7){
+      showTime();
       Timeout.clear('timeout_'+sessionId);
       initializeGame(actv_code, sessionId); // trik lain, dua timeout, yang satu by default dia akan initgame setelah durasi tertentu, satu timeout lagi by default cancel game dan direset tiap kali player kurang dari minimum
     }
@@ -265,11 +276,15 @@ function checkWaitOrAutoKill(session){
       if(count == remainingWerewolf) {
         StateManager.getOrderVoted(session_id, 'kill').then(function(victimOrder){
           broadcastAfterKillMessage(session_id, victimOrder);
+        }).catch(function(err){
+          StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
         });
         console.log('this line is triggered when everyone already voted to kill');
         Timeout.clear('timeout_kill_'+session_id);
         StateManager.setSessionState(session_id, 'heal').then(function(){
-          doctorTurn(session_id);
+          StateManager.resetVoteMark(session_id).then(function(){
+            doctorTurn(session_id);
+          });
         });
       }
     });
@@ -288,7 +303,10 @@ function checkWaitOrAutoHeal(session) {
         // real perform kill should be put in here.
         // pindah state & decide heal or kill player
         StateManager.setSessionState(session_id, 'leech').then(function(){
-          decideHealOrKillPlayer(session_id);
+          StateManager.resetVoteMark(session_id).then(function() {
+            decideHealOrKillPlayer(session_id);
+            leechTurn(session_id);
+          });
         });
       }
     })
@@ -309,7 +327,11 @@ function decideHealOrKillPlayer(session_id) {
             pushMessage(roomId, 'Tadi malam, ada satu korban yang mati, dia adalah ' + victim.display_name);
           });
         }
+      }).catch(function(err){
+        StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
       });
+    }).catch(function(err){
+      StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
     });
   });
 }
@@ -359,9 +381,11 @@ function initializeGame(actv_code, sessionId) {
       // send a message to every werewolf that he should pick someone to be killed
       // broadcast a message to each werewolf everytime a werewolf pick someone, (they must agree with a person or, the system will pick a random person from a subset they suggest)
       StateManager.setSessionState(sessionId, 'kill').then(function(){
-        werewolfTurn(sessionId);
+        resetVoteMark(sessionId).then(function(){
+          werewolfTurn(sessionId);
+        });
       }).catch(function(err){
-      StateManager.writeLog('error on initializing game, can not set session state to kill reason :'+ err.toString);    
+        StateManager.writeLog('error on initializing game, can not set session state to kill reason :'+ err.toString);    
       })
     });
   }).catch(function(err){
@@ -457,12 +481,16 @@ function werewolfTurn(sessionId) {
       }
     });
     var durasi_vote_kill = 1000 * 60 ;
+    console.log("setting up a timeout to automatically move to doctor turn on ");
+    showTime();
     Timeout.set('timeout_kill_'+sessionId, function() {
       // Auto transition ke state heal. sementara ini dulu 
       console.log("this line is auto triggered even when no one vote")
       // performKillPlayer(sessionId);
       StateManager.setSessionState(sessionId, 'heal').then(function(){
-        doctorTurn(sessionId);
+        StateManager.resetVoteMark(sessionId).then(function(){
+          doctorTurn(sessionId);
+        });
       });
       console.log("supposed to change the state into heal ");
     }, durasi_vote_kill);
@@ -470,7 +498,6 @@ function werewolfTurn(sessionId) {
 }
 
 function doctorTurn(sessionId) {
-  console.log("this function trigger doctor turns");
   StateManager.getSession(sessionId).then(function(session){
     var roomId = session.group_room_id;
     pushMessage(roomId, 'Malam masih berlangsung, para dokter bertugas menyembuhkan yang sakit. Bagi yang merasa menjadi dokter silahkan cek chat dengan bot ini');
@@ -487,14 +514,36 @@ function doctorTurn(sessionId) {
       }
     });
 
+    console.log("setting up a timeout to automatically move to leech turn on ");
+    showTime();
     // Kasih timeout untuk heal
     var durasi_vote_heal = 1000 * 60 ;
     Timeout.set('timeout_heal_'+sessionId, function(){
       console.log("this line is automatically executed after time pass for doctor session");
       StateManager.setSessionState(sessionId, 'leech').then(function(){
-        decideHealOrKillPlayer(sessionId);
+        StateManager.resetVoteMark(sessionId).then(function(){
+          decideHealOrKillPlayer(sessionId);
+          leechTurn(session_id);
+        });
       });
     }, durasi_vote_heal);
+  });
+}
+
+function leechTurn(session_id) {
+  StateManager.getSession(session_id).then(function(session){
+    console.log("harusnya cek apakah werewolf menang dengan membunuh warga desa ini.. (jumlah remaining werewolf == jumlah warga desa)");
+    var roomId = session.group_room_id;
+    pushMessage(roomId, 'Ayamg berkokok, pagi ini warga desa memutuskan untuk menggantung satu orang yang dicurigai sebagai siluman serigala -  GGS (ganteng-ganteng serigala). \n ');
+    generatePlayerChoices(session_id, true).then(function(optionsMessage){
+        pushMessage(roomId, optionsMessage);
+    });
+    pushMessage(roomId, 'Silahkan vote siapa yang ingin digantung dengan perintah leech <spasi> nomor urut, kamu hanya bisa melakukan voting 1 kali');
+
+    var durasi_vote_leech = 1000 * 60 * 2;
+    Timeout.set('timeout_leech_'+session_id, function() {
+      console.log("harusnya cek apakah warga desa menang (remaining werewolf = 0)")
+    }, durasi_vote_leech);
   });
 }
 

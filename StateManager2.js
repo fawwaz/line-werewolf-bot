@@ -901,6 +901,71 @@ function clearVote(sessionId, action) {
     });
 }
 
+function markPlayerAlreadyVoted(userId) {
+    return new Promise(function(resolve, reject) {
+        if(!userId) {
+            reject('empty userId provided');
+        }
+
+        request.put(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            'member_id': userId
+        })})
+        .query({
+            'm': false
+        })
+        .send({
+            '$set': {
+                'voted': true
+            }
+        }).then(function(succ){
+            resolve(succ.text);
+            var result = JSON.parse(succ.text);
+
+            if(result.n == 0){
+                reject('Player with id = ' + playerId + ' not found');
+            }else if(result.n > 1){
+                reject('Illegal state, found multiple player with id = ' + playerId);
+            }else{
+                resolve(result);
+            }
+        }, function(err){
+            reject(err);
+        });
+    });
+}
+
+function resetVoteMark(sessionId) {
+    return new Promise(function(resolve, reject) {
+        if(!sessionId) {
+            reject('empty sessionId provided');
+        }
+
+        request.put(COLLECTION_MEMBER)
+        .set('Content-Type', 'application/json')
+        .query({'apiKey':API_KEY})
+        .query({'q':JSON.stringify({
+            'session_id': sessionId
+        })})
+        .query({
+            'm': true
+        })
+        .send({
+            '$set': {
+                'voted': false
+            }
+        }).then(function(succ){
+            resolve(succ.text);
+            var result = JSON.parse(succ.text);
+            resolve(result);
+        }, function(err){
+            reject(err);
+        });
+    });
+}
+
 /**
  * POTENTIAL IMPROVEMENT
  * 
@@ -1005,6 +1070,7 @@ function errCallback(err){
 // getOrderVoted('session_1','kill').then(succCallback).catch(errCallback);
 // clearVote('session_1','kill').then(succCallback).catch(errCallback);
 // countVote('5953d2e6c2ef164ab2db74f4','kill').then(succCallback).catch(errCallback);
+// resetVoteMark('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
 
 // setDefaultRoleByActvCode('4055').then(succCallback);
 
@@ -1048,5 +1114,7 @@ module.exports = {
     'voteUp': voteUp,
     'countVote': countVote,
     'getOrderVoted': getOrderVoted,
-    'clearVote':clearVote
+    'clearVote':clearVote,
+    'markPlayerAlreadyVoted':markPlayerAlreadyVoted,
+    'resetVoteMark': resetVoteMark
 }
