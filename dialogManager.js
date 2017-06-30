@@ -166,9 +166,15 @@ function handleKill(action_src_id, action_obj, event){
           }else{
             // vote up dan broadcast message, jangan lupa untuk clear kalau turnnya udah selesai kasih timeout
             var playerOrder = action_obj.payload;
-            StateManager.voteUp(session_id, 'kill', playerOrder).then(function(){
-              broadcastVoteKillMessage(session_id, action_src_id, action_obj, event);
-              checkWaitOrAutoKill(session);
+            StateManager.findPlayerByOrder(session_id, playerOrder).then(function(victim){
+              if(victim.is_alive){
+                StateManager.voteUp(session_id, 'kill', playerOrder).then(function(){
+                  broadcastVoteKillMessage(session_id, action_src_id, action_obj, event);
+                  checkWaitOrAutoKill(session);
+                });
+              }else{
+                replyMessage(event.replyToken, 'Kamu hanya bisa membunuh orang yang masih hidup');
+              }
             });
           }
         });
@@ -200,9 +206,15 @@ function handleHeal(userId, action_obj, event){
           replyMessage(event.replyToken, 'Kamu hanya bisa menyembuhkan saat giliran kamu bekerja');
         } else {
           var playerOrder = action_obj.payload;
-          StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
-            broadcastVoteHealMessage(session_id, userId, action_obj, event);
-            checkWaitOrAutoHeal(session);
+          StateManager.findPlayerByOrder(session_id, playerOrder).then(function(patient){
+            if(patient.is_alive) {
+              StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
+                broadcastVoteHealMessage(session_id, userId, action_obj, event);
+                checkWaitOrAutoHeal(session);
+              });
+            } else {
+              replyMessage(event.replyToken, 'Kamu hanya bisa menyembuhkan orang yang masih hidup');
+            }
           });
         }
       });
@@ -465,7 +477,7 @@ function doctorTurn(sessionId) {
   });
   StateManager.findPlayerWithRoleBySessionId(sessionId, 'doctor')
   .then(function(players){
-    generatePlayerChoices(sessionId, false)
+    generatePlayerChoices(sessionId, true)
     .then(function(message){
       for (var i = 0; i < players.length; i++) {
         var playerId = players[i].member_id;
