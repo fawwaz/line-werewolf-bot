@@ -516,7 +516,7 @@ function findMaxOrder(session_id) {
             'session_id':session_id
         })})
         .query({'s':JSON.stringify({
-            'max_order':-1
+            'order':-1
         })})
         .query({'l':1})
         .then(function(succ){
@@ -535,7 +535,7 @@ function findMaxOrder(session_id) {
 
 function countRolesAlive(room_id){
     return new Promise(function(resolve, reject){
-        findPlayerByRoomId(room_id)
+        findAlive(room_id)
         .then(function(players){
             var groupped = _.countBy(players,'role');
             resolve(groupped);
@@ -925,7 +925,7 @@ function markPlayerAlreadyVoted(userId) {
             var result = JSON.parse(succ.text);
 
             if(result.n == 0){
-                reject('Player with id = ' + playerId + ' not found');
+                reject('Player with id = ' + userId + ' not found');
             }else if(result.n > 1){
                 reject('Illegal state, found multiple player with id = ' + playerId);
             }else{
@@ -1072,7 +1072,18 @@ function errCallback(err){
 // countVote('5953d2e6c2ef164ab2db74f4','kill').then(succCallback).catch(errCallback);
 // resetVoteMark('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);
 
+// Untuk reset awal
 // setDefaultRoleByActvCode('4055').then(succCallback);
+// setSessionState('5953d2e6c2ef164ab2db74f4','INITIAL').then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',1, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',2, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',3, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',4, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',5, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',6, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',7, true).then(succCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',8, true).then(succCallback);
+// findAlive('room_1').then(succCallback).catch(errCallback);
 
 // findPlayerWithRoleByRoomId('room_1','werewolf').then(succCallback).catch(errCallback);
 // findPlayerBySessionId('5953d2e6c2ef164ab2db74f4').then(succCallback).catch(errCallback);

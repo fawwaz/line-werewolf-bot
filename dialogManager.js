@@ -216,7 +216,7 @@ function handleHeal(userId, action_obj, event){
           var playerOrder = action_obj.payload;
           StateManager.findPlayerByOrder(session_id, playerOrder).then(function(patient){
             if(patient.is_alive) {
-              if(!player.voted){
+              if(!healer.voted){
                 StateManager.voteUp(session_id, 'heal', playerOrder).then(function(){
                   StateManager.markPlayerAlreadyVoted(userId).then(function(){
                     broadcastVoteHealMessage(session_id, userId, action_obj, event);
@@ -296,7 +296,7 @@ function checkCancelGameOrInitGame(actv_code, sessionId) {
     // tapi auto start jalan kalau udah treshold waktu tertentu, kalau cuma autocancel, setiap kali membernya == member minimum, langsung auto start
     // sementara ini sistemnya kaya gitu dulu, dan sementara ini dihardcode dulu, harusnya ada di config.js / constants.js
     // oiya constant.js harusnya make internationalization. (i18n.js)
-    if(memberSize >= 7){
+    if(memberSize >= 6){
       showTime();
       Timeout.clear('timeout_'+sessionId);
       initializeGame(actv_code, sessionId); // trik lain, dua timeout, yang satu by default dia akan initgame setelah durasi tertentu, satu timeout lagi by default cancel game dan direset tiap kali player kurang dari minimum
@@ -317,7 +317,7 @@ function checkWaitOrAutoKill(session){
         }).catch(function(err){
           StateManager.writeLog('Failed on checkWaitOrAutoKill reason : ' + err.toString());
         });
-        
+
         console.log('this line is triggered when everyone already voted to kill');
         Timeout.clear('timeout_kill_'+session_id);
         StateManager.setSessionState(session_id, 'heal').then(function(){
@@ -351,7 +351,6 @@ function checkWaitOrAutoHeal(session) {
         StateManager.setSessionState(session_id, 'leech').then(function(){
           StateManager.resetVoteMark(session_id).then(function() {
             decideHealOrKillPlayer(session_id);
-            leechTurn(session_id);
           });
         });
       }
@@ -361,6 +360,7 @@ function checkWaitOrAutoHeal(session) {
 
 function checkWaitOrAutoLeech(session) {
   var session_id = session.id.$oid;
+  var roomId = session.group_room_id;
   StateManager.countVote(session_id, 'leech').then(function(count){
     StateManager.findAlive(session.group_room_id).then(function(players){
       var remaining_players = players.length;
@@ -373,12 +373,32 @@ function checkWaitOrAutoLeech(session) {
         });
         console.log('this line is triggered when everywone already voted');
         Timeout.clear('timeout_leech_'+session_id);
+        
         StateManager.setSessionState(session_id, 'kill').then(function(){
           StateManager.resetVoteMark(session_id).then(function(){
-            werewolfTurn(session_id);
+            decideWhomToLeech(session_id,roomId);
           });
         });
+
       }
+    });
+  });
+}
+
+function checkEndCondition(session_id) {
+  return new Promise(function(resolve, reject){
+    StateManager.getSession(session_id).then(function(session){
+      var roomId = session.group_room_id;
+      StateManager.countRolesAlive(roomId).then(function(remaining) {
+        StateManager.writeLog('tercatat : ' + JSON.stringify(remaining));
+        if(remaining.werewolf >= remaining.villager) {
+          resolve('werewolf');
+        } else if(remaining.werewolf == 0) {
+          resolve('villager');
+        } else {
+          resolve('notyet');
+        }
+      })
     });
   });
 }
@@ -386,32 +406,105 @@ function checkWaitOrAutoLeech(session) {
 function decideHealOrKillPlayer(session_id) {
   StateManager.getSession(session_id).then(function(session){
     var roomId = session.group_room_id;
-    StateManager.getOrderVoted(session_id,'heal').then(function(votedHeal){
-      StateManager.getOrderVoted(session_id, 'kill').then(function(votedKill){
+    StateManager.getOrderVoted(session_id,'kill').then(function(votedKill){
+      StateManager.getOrderVoted(session_id, 'heal').then(function(votedHeal){
         if(votedHeal == votedKill) {
           resetVote(session_id);
           pushMessage(roomId, 'Syukurlah, tadi malam para dokter berhasil menyelamatkan nyawa 1 orang. Tidak ada korban tadi malam');
+          // Harusnya ini transisis stae gak cuma leech turn, tapi juga reset vote, dan setSessisonState biar jadi leech -- checked ternyata udah diwrap oleh fungsi ini
+          leechTurn(session_id);
         }else{ 
-          performKillPlayer(session_id);
-          StateManager.findPlayerByOrder(session_id, votedKill).then(function(victim){
-            pushMessage(roomId, 'Tadi malam, ada satu korban yang mati, dia adalah ' + victim.display_name);
+          performKillPlayer(session_id, function(){
+            checkEndCondition(session_id).then(function(winner){
+              console.log(winner);
+              if(winner == 'werewolf'){
+                StateManager.setSessionState(session_id, 'finished_wolf').then(function(){
+                  pushMessage(roomId, 'Werewolf menang, jumlah werewolf = jumlah pemain !');
+                });
+              }else if(winner == 'villager'){
+                StateManager.setSessionState(session_id, 'finished_villager').then(function(){
+                  pushMessage(roomId, 'Warga desa menang, jumlah werewolf = 0 !');
+                });
+              }else{
+                StateManager.findPlayerByOrder(session_id, votedKill).then(function(victim){
+                  pushMessage(roomId, 'Tadi malam, ada satu korban yang mati, dia adalah ' + victim.display_name);
+                  // Harusnya ini transisis stae gak cuma leech turn, tapi juga reset vote, dan setSessisonState biar jadi leech
+                  leechTurn(session_id);
+                });
+              }
+            });
           });
         }
       }).catch(function(err){
+        // Harusnya ini transisis stae gak cuma leech turn, tapi juga reset vote, dan setSessisonState biar jadi leech
+        performKillPlayer(session_id, function(){
+          checkEndCondition(session_id).then(function(winner){
+            console.log(winner);
+            if(winner == 'werewolf'){
+              StateManager.setSessionState(session_id, 'finished_wolf').then(function(){
+                pushMessage(roomId, 'Werewolf menang, jumlah werewolf = jumlah pemain !');
+              });
+            }else if(winner == 'villager'){
+              StateManager.setSessionState(session_id, 'finished_villager').then(function(){
+                pushMessage(roomId, 'Warga desa menang, jumlah werewolf = 0 !');
+              });
+            }else{
+              StateManager.findPlayerByOrder(session_id, votedKill).then(function(victim){
+                pushMessage(roomId, 'Tadi malam, ada satu korban yang mati, dia adalah ' + victim.display_name);
+                // Harusnya ini transisis stae gak cuma leech turn, tapi juga reset vote, dan setSessisonState biar jadi leech
+                leechTurn(session_id);
+              });
+            }
+          });
+        });
         StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
       });
     }).catch(function(err){
+      // Harusnya ini transisis stae gak cuma leech turn, tapi juga reset vote, dan setSessisonState biar jadi leech
+      leechTurn(session_id);
       StateManager.writeLog('Failed on decideHealOrKillPlayer reason : ' + err.toString());
     });
   });
 }
 
-function performKillPlayer(session_id) {
+function decideWhomToLeech(session_id, roomId) {
+  performLeechPlayer(session_id, function(){
+    checkEndCondition(session_id).then(function(winner){
+      console.log(winner);
+      if(winner == 'werewolf') {
+        StateManager.setSessionState(session_id, 'finished_wolf').then(function(){
+          pushMessage(roomId, 'Game bearkhir, werewolf menang karena jumlah werewolf = jumlah villager');
+        })
+      }else if(winner == 'villager') {
+        StateManager.setSessionState(session_id, 'finished_villager').then(function(){
+          pushMessage(roomId, 'Game bearkhir, warga desa menang karena werewolf sudah mati semuanya');
+        });
+      }else if(winner == 'notyet') {
+        werewolfTurn(session_id);
+      }
+    });
+  });
+}
+
+function performLeechPlayer(session_id, callback) {
+  StateManager.getOrderVoted(session_id, 'leech').then(function(leeched){
+    StateManager.setPlayerLiveStatusByOrder(session_id, leeched, false).then(function() {
+      StateManager.clearVote(session_id, 'leech').then(function(){
+        callback();
+      });
+    });
+  }).catch(function(err){
+    StateManager.writeLog("error on function perform Leech Player reason : " +err.toString());
+    werewolfTurn(session_id);
+  }) ;
+}
+
+function performKillPlayer(session_id, callback) {
   StateManager.getOrderVoted(session_id, 'kill').then(function(voted){
     // kill someone.. after doctor failed to heal
     StateManager.setPlayerLiveStatusByOrder(session_id, voted, false).then(function(){
       resetVote(session_id);
-      
+      callback();
       // send message whom is killed
       // set the turn to doctor, (setState but after someone being killed)
       
@@ -451,12 +544,13 @@ function initializeGame(actv_code, sessionId) {
       // send a message to every werewolf that he should pick someone to be killed
       // broadcast a message to each werewolf everytime a werewolf pick someone, (they must agree with a person or, the system will pick a random person from a subset they suggest)
       StateManager.setSessionState(sessionId, 'kill').then(function(){
-        resetVoteMark(sessionId).then(function(){
+        StateManager.resetVoteMark(sessionId).then(function(){
           werewolfTurn(sessionId);
         });
-      }).catch(function(err){
-        StateManager.writeLog('error on initializing game, can not set session state to kill reason :'+ err.toString);    
-      })
+      });
+      // .catch(function(err){
+      //   StateManager.writeLog('error on initializing game, can not set session state to kill reason :'+ err.toString);    
+      // })
     });
   }).catch(function(err){
     StateManager.writeLog('error on initializing game :'+ err.toString);
@@ -592,8 +686,7 @@ function doctorTurn(sessionId) {
       console.log("this line is automatically executed after time pass for doctor session");
       StateManager.setSessionState(sessionId, 'leech').then(function(){
         StateManager.resetVoteMark(sessionId).then(function(){
-          decideHealOrKillPlayer(sessionId);
-          leechTurn(session_id);
+          decideHealOrKillPlayer(sessionId); 
         });
       });
     }, durasi_vote_heal);
@@ -607,7 +700,7 @@ function leechTurn(session_id) {
     var roomId = session.group_room_id;
     pushMessage(roomId, 'Ayam berkokok, pagi ini warga desa memutuskan untuk menggantung satu orang yang dicurigai sebagai siluman serigala -  GGS (ganteng-ganteng serigala). \n Bagi yang masih hihdup Silahkan cek chat pribadi dengan bot ini untuk melakukan voting siapa yang ingin digantung. Kamu punya waktu 2 menit untuk berdiskusi');
     generatePlayerChoices(session_id, true).then(function(optionsMessage){
-      StateManager.findalive(roomId).then(function(players){
+      StateManager.findAlive(roomId).then(function(players){
         for (var i = 0; i < players.length; i++) {
           var playerId = players[i].member_id;
           optionsMessage = optionsMessage + '\n\n Silahkan vote siapa yang ingin digantung dengan perintah leech <spasi> nomor urut, kamu hanya bisa melakukan voting 1 kali';
@@ -618,7 +711,12 @@ function leechTurn(session_id) {
 
     var durasi_vote_leech = 1000 * 60 * 2;
     Timeout.set('timeout_leech_'+session_id, function() {
-      console.log("harusnya cek apakah warga desa menang (remaining werewolf = 0)")
+      console.log("harusnya cek apakah warga desa menang (remaining werewolf = 0)");
+      StateManager.setSessionState(session_id, 'kill').then(function(){
+        StateManager.resetVoteMark(session_id).then(function(){
+          decideWhomToLeech(session_id, roomId);
+        });
+      });
     }, durasi_vote_leech);
   });
 }
@@ -712,7 +810,7 @@ function broadcastVoteHealMessage(session_id, action_src_id, action_obj, event){
   });
 }
 
-broadcastAfterHealMessage(session_id, order) {
+function broadcastAfterHealMessage(session_id, order) {
   StateManager.findPlayerWithRoleBySessionId(session_id, 'doctor').then(function(players){
     StateManager.findPlayerByOrder(session_id, order).then(function(healed){
       for (var i = 0; i < players.length; i++) {
