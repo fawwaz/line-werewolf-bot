@@ -1015,7 +1015,7 @@ function errCallback(err){
 // setSessionState('5953d2e6c2ef164ab2db74f4', 'kill').then(succCallback)catch(errCallback);
 // findPlayerByOrder('5953d2e6c2ef164ab2db74f4',1).then(succCallback).catch(errCallback);
 
-setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',1, false).then(succCallback).catch(errCallback);
+// setPlayerLiveStatusByOrder('5953d2e6c2ef164ab2db74f4',1, false).then(succCallback).catch(errCallback);
 
 module.exports = {
     'killPlayer': killPlayer,
