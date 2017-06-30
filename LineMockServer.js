@@ -9,11 +9,13 @@ app.get('/', function(req, res){
 });
 
 app.post('/message/reply',function(req, res){
+    showTime();
     console.dir(req.body);
     res.json(req.body);
 });
 
 app.post('/message/push', function(req, res){
+    showTime();
     console.dir(req.body);
     res.json(req.body);
 });
@@ -119,11 +121,14 @@ app.get('/profile/:userId', function(req, res){
     };
 
     var selectedUser = users[req.params.userId];
+    showTime();
+    console.log("Returning profile for userId = "+req.params.userId);
     console.dir(selectedUser);
     res.json(selectedUser);
 });
 
 app.post('*', function(req, res){
+    showTime();
     console.dir(req.body);
     res.json(req.body);
 });
@@ -131,3 +136,13 @@ app.post('*', function(req, res){
 app.listen(8000, function(){
     console.log("listening on port 8000");
 });
+
+function showTime(){
+    var options = {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+    },
+    formatter = new Intl.DateTimeFormat([], options);
+    console.log(formatter.format(new Date()));
+}

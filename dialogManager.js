@@ -254,8 +254,8 @@ function checkWaitOrAutoKill(session){
         StateManager.getOrderVoted(session_id, 'kill').then(function(victimOrder){
           broadcastAfterKillMessage(session_id, victimOrder);
         });
-        console.log('this line is triggered when everyone already voted');
-        Timeout.clear('timeout_kill_'+session_id); 
+        console.log('this line is triggered when everyone already voted to kill');
+        Timeout.clear('timeout_kill_'+session_id);
         StateManager.setSessionState(session_id, 'heal').then(function(){
           doctorTurn(session_id);
         });
@@ -271,7 +271,7 @@ function checkWaitOrAutoHeal(session) {
       var remainingDoctor = roles.doctor;
       var votedDoctor = count;
       if(count == remainingDoctor) {
-        console.log("this line is triggered when everyone already voted");
+        console.log("this line is triggered when everyone already voted to heal");
         Timeout.clear('timeout_heal_'+session_id);
         // real perform kill should be put in here.
         // pindah state & decide heal or kill player
@@ -289,6 +289,7 @@ function decideHealOrKillPlayer(session_id) {
     StateManager.getOrderVoted(session_id,'heal').then(function(votedHeal){
       StateManager.getOrderVoted(session_id, 'kill').then(function(votedKill){
         if(votedHeal == votedKill) {
+          resetVote(session_id);
           pushMessage(roomId, 'Syukurlah, tadi malam para dokter berhasil menyelamatkan nyawa 1 orang. Tidak ada korban tadi malam');
         }else{ 
           performKillPlayer(session_id);
@@ -305,17 +306,21 @@ function performKillPlayer(session_id) {
   StateManager.getOrderVoted(session_id, 'kill').then(function(voted){
     // kill someone.. after doctor failed to heal
     StateManager.setPlayerLiveStatusByOrder(session_id, voted, false).then(function(){
-      StateManager.clearVote(session_id, 'kill');
-      StateManager.clearVote(session_id, 'heal');
+      resetVote(session_id);
       
       // send message whom is killed
       // set the turn to doctor, (setState but after someone being killed)
-      doctorTurn(session_id);
+      
     });
   }).catch(function(err){
     StateManager.writeLog("error on function perform Kill Player reason : " +err.toString());
     doctorTurn(session_id);
   });
+}
+
+function resetVote(session_id){
+  StateManager.clearVote(session_id, 'kill');
+  StateManager.clearVote(session_id, 'heal');
 }
 
 function initializeGame(actv_code, sessionId) {
@@ -444,8 +449,8 @@ function werewolfTurn(sessionId) {
       // Auto transition ke state heal. sementara ini dulu 
       console.log("this line is auto triggered even when no one vote")
       // performKillPlayer(sessionId);
-      StateManager.setSessionState(session_id, 'heal').then(function(){
-        doctorTurn(session_id);
+      StateManager.setSessionState(sessionId, 'heal').then(function(){
+        doctorTurn(sessionId);
       });
       console.log("supposed to change the state into heal ");
     }, durasi_vote_kill);
@@ -474,15 +479,14 @@ function doctorTurn(sessionId) {
     var durasi_vote_heal = 1000 * 60 ;
     Timeout.set('timeout_heal_'+sessionId, function(){
       console.log("this line is automatically executed after time pass for doctor session");
-      Session.setSessionState(session_id, 'leech').then(function(){
-        decideHealOrKillPlayer(session_id);
+      StateManager.setSessionState(sessionId, 'leech').then(function(){
+        decideHealOrKillPlayer(sessionId);
       });
     }, durasi_vote_heal);
   });
 }
 
 function generatePlayerChoices(sessionId, showStatus) {
-  console.log("session id to generate" + sessionId);
   return new Promise(function(resolve, reject){
     StateManager.findPlayerBySessionId(sessionId)
     .then(function(players){
@@ -619,6 +623,16 @@ function shuffle(array) {
 
 function pickRandomNFromArray(n, array) {
   return shuffle(array).slice(0, n);
+}
+
+function showTime(){
+    var options = {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+    },
+    formatter = new Intl.DateTimeFormat([], options);
+    console.log(formatter.format(new Date()));
 }
 
 

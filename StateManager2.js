@@ -113,7 +113,6 @@ function createSession(group_room_id, activation_code) {
 
 function getSession(sessionId) {
     return new Promise(function(resolve, reject){
-        console.log("session id yang mau diget dalam getSession function adalah :" + sessionId);
         request.get(COLLECTION_SESSION)
         .set('Content-Type', 'application/json')
         .query({'apiKey':API_KEY})
