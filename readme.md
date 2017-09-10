@@ -7,5 +7,3 @@ My first experience on playing werewolf was in TEC Gathering. I found it was so 
 Besides of that, sometimes the narrator tend to favor one side over another. I usually play with a lean narrator that yelling out a provocative clue indicating which player is a werewolf or a seer. Off course, it won't be fun anymore if you meet that guy.
 
 So considering all the reasons above, I had an idea to create this werewolf bot. Now, No one will be sacrified to play werewolf, and you won't meet an unfair narrator. 
-
-
